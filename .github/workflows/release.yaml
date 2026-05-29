@@ -18,28 +18,36 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-            ext: ''
+            archive_ext: tar.gz
+            bin_ext: ''
           - goos: linux
             goarch: arm64
-            ext: ''
+            archive_ext: tar.gz
+            bin_ext: ''
           - goos: windows
             goarch: amd64
-            ext: .exe
+            archive_ext: zip
+            bin_ext: .exe
           - goos: windows
             goarch: arm64
-            ext: .exe
+            archive_ext: zip
+            bin_ext: .exe
           - goos: darwin
             goarch: amd64
-            ext: ''
+            archive_ext: tar.gz
+            bin_ext: ''
           - goos: darwin
             goarch: arm64
-            ext: ''
+            archive_ext: tar.gz
+            bin_ext: ''
           - goos: freebsd
             goarch: amd64
-            ext: ''
+            archive_ext: tar.gz
+            bin_ext: ''
           - goos: freebsd
             goarch: arm64
-            ext: ''
+            archive_ext: tar.gz
+            bin_ext: ''
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,18 +70,32 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
-          EXT: ${{ matrix.ext }}
+          BIN_EXT: ${{ matrix.bin_ext }}
         run: |
-          mkdir -p dist
-          asset_name="cli-proxy-api_${VERSION}_${GOOS}_${GOARCH}${EXT}"
+          mkdir -p dist/package
           go build \
             -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" \
-            -o "dist/${asset_name}" \
+            -o "dist/package/cli-proxy-api${BIN_EXT}" \
             ./cmd/server
+          cp config.example.yaml dist/package/config.example.yaml
+      - name: Create archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          ARCHIVE_EXT: ${{ matrix.archive_ext }}
+        run: |
+          set -euo pipefail
+          archive_name="cli-proxy-rum_${GOOS}_${GOARCH}.${ARCHIVE_EXT}"
+          rm -f "dist/${archive_name}"
+          if [ "${ARCHIVE_EXT}" = "zip" ]; then
+            (cd dist/package && zip -qr "../${archive_name}" .)
+          else
+            tar -czf "dist/${archive_name}" -C dist/package .
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: cli-proxy-api_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }}
-          path: dist/cli-proxy-api_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }}
+          name: cli-proxy-rum_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/cli-proxy-rum_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.archive_ext }}
           if-no-files-found: error
 
   release:

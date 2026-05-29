@@ -152,6 +152,20 @@ Verify the server builds:
 go build -o test-output ./cmd/server
 ```
 
+## Release Builds
+
+GitHub Actions publishes release binaries when a version tag starting with `v`
+is pushed:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The release workflow uses GoReleaser and uploads archives for Linux, Windows,
+macOS, and FreeBSD. The regular build workflow also runs on pull requests,
+pushes to `main`, and manual dispatch from the GitHub Actions page.
+
 ## Contributing
 
 Pull requests are welcome. Keep changes focused, include tests for behavior

@@ -1,6 +1,10 @@
-name: pr-test-build
+name: build
 
 on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -21,6 +25,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Test
+        run: go test ./...
       - name: Build
         run: |
           go build -o test-output ./cmd/server

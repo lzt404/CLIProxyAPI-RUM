@@ -165,6 +165,8 @@ git push origin v1.0.0
 The release workflow uploads compiled executable files directly for Linux,
 Windows, macOS, and FreeBSD. The regular build workflow also runs on pull
 requests, pushes to `main`, and manual dispatch from the GitHub Actions page.
+Release asset names include the full tag, for example
+`cli-proxy-api_v7.1.29-rum.2_windows_amd64.exe`.
 
 ## Contributing
 

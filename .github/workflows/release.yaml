@@ -18,28 +18,28 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-            artifact: cli-proxy-api-linux-amd64
+            ext: ''
           - goos: linux
             goarch: arm64
-            artifact: cli-proxy-api-linux-arm64
+            ext: ''
           - goos: windows
             goarch: amd64
-            artifact: cli-proxy-api-windows-amd64.exe
+            ext: .exe
           - goos: windows
             goarch: arm64
-            artifact: cli-proxy-api-windows-arm64.exe
+            ext: .exe
           - goos: darwin
             goarch: amd64
-            artifact: cli-proxy-api-darwin-amd64
+            ext: ''
           - goos: darwin
             goarch: arm64
-            artifact: cli-proxy-api-darwin-arm64
+            ext: ''
           - goos: freebsd
             goarch: amd64
-            artifact: cli-proxy-api-freebsd-amd64
+            ext: ''
           - goos: freebsd
             goarch: arm64
-            artifact: cli-proxy-api-freebsd-arm64
+            ext: ''
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,16 +62,18 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
+          EXT: ${{ matrix.ext }}
         run: |
           mkdir -p dist
+          asset_name="cli-proxy-api_${VERSION}_${GOOS}_${GOARCH}${EXT}"
           go build \
             -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" \
-            -o "dist/${{ matrix.artifact }}" \
+            -o "dist/${asset_name}" \
             ./cmd/server
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}
+          name: cli-proxy-api_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }}
+          path: dist/cli-proxy-api_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }}
           if-no-files-found: error
 
   release:

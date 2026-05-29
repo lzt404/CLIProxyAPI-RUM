@@ -83,14 +83,13 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: List executable assets
+        run: ls -la dist
       - name: Publish executable assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          prerelease: true
+          make_latest: false
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
-          else
-            gh release create "${GITHUB_REF_NAME}" dist/* \
-              --title "${GITHUB_REF_NAME}" \
-              --notes "Release ${GITHUB_REF_NAME}"
-          fi
+          GITHUB_TOKEN: ${{ github.token }}

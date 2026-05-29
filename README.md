@@ -162,9 +162,9 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The release workflow uses GoReleaser and uploads archives for Linux, Windows,
-macOS, and FreeBSD. The regular build workflow also runs on pull requests,
-pushes to `main`, and manual dispatch from the GitHub Actions page.
+The release workflow uploads compiled executable files directly for Linux,
+Windows, macOS, and FreeBSD. The regular build workflow also runs on pull
+requests, pushes to `main`, and manual dispatch from the GitHub Actions page.
 
 ## Contributing
 

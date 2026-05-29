@@ -9,8 +9,37 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            artifact: cli-proxy-api-linux-amd64
+          - goos: linux
+            goarch: arm64
+            artifact: cli-proxy-api-linux-arm64
+          - goos: windows
+            goarch: amd64
+            artifact: cli-proxy-api-windows-amd64.exe
+          - goos: windows
+            goarch: arm64
+            artifact: cli-proxy-api-windows-arm64.exe
+          - goos: darwin
+            goarch: amd64
+            artifact: cli-proxy-api-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            artifact: cli-proxy-api-darwin-arm64
+          - goos: freebsd
+            goarch: amd64
+            artifact: cli-proxy-api-freebsd-amd64
+          - goos: freebsd
+            goarch: arm64
+            artifact: cli-proxy-api-freebsd-arm64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,23 +48,49 @@ jobs:
         run: |
           git fetch --depth 1 https://github.com/router-for-me/models.git main
           git show FETCH_HEAD:models.json > internal/registry/models/models.json
-      - run: git fetch --force --tags
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - name: Generate Build Metadata
+      - name: Generate build metadata
         run: |
-          echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
-          echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
-          echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
-      - uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean --skip=validate
+          echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          echo "COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Build executable
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ env.VERSION }}
-          COMMIT: ${{ env.COMMIT }}
-          BUILD_DATE: ${{ env.BUILD_DATE }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist
+          go build \
+            -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" \
+            -o "dist/${{ matrix.artifact }}" \
+            ./cmd/server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish executable assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* \
+              --title "${GITHUB_REF_NAME}" \
+              --notes "Release ${GITHUB_REF_NAME}"
+          fi

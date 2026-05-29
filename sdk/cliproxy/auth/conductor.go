@@ -1821,6 +1821,71 @@ func pinnedAuthIDFromMetadata(meta map[string]any) string {
 	}
 }
 
+func allowedAuthIDsFromMetadata(meta map[string]any) (map[string]struct{}, bool) {
+	if len(meta) == 0 {
+		return nil, false
+	}
+	raw, ok := meta[cliproxyexecutor.AllowedAuthIDsMetadataKey]
+	if !ok {
+		return nil, false
+	}
+	out := make(map[string]struct{})
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out[value] = struct{}{}
+		}
+	}
+	switch val := raw.(type) {
+	case nil:
+	case string:
+		for _, part := range strings.Split(val, ",") {
+			add(part)
+		}
+	case []byte:
+		for _, part := range strings.Split(string(val), ",") {
+			add(part)
+		}
+	case []string:
+		for _, item := range val {
+			add(item)
+		}
+	case []any:
+		for _, item := range val {
+			switch typed := item.(type) {
+			case string:
+				add(typed)
+			case []byte:
+				add(string(typed))
+			}
+		}
+	case map[string]struct{}:
+		for item := range val {
+			add(item)
+		}
+	case map[string]bool:
+		for item, allowed := range val {
+			if allowed {
+				add(item)
+			}
+		}
+	}
+	return out, true
+}
+
+func authIDAllowedByMetadata(authID string, meta map[string]any) bool {
+	authID = strings.TrimSpace(authID)
+	if authID == "" {
+		return false
+	}
+	allowed, restricted := allowedAuthIDsFromMetadata(meta)
+	if !restricted {
+		return true
+	}
+	_, ok := allowed[authID]
+	return ok
+}
+
 func disallowFreeAuthFromMetadata(meta map[string]any) bool {
 	if len(meta) == 0 {
 		return false
@@ -3032,6 +3097,9 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 		if pinnedAuthID != "" && candidate.ID != pinnedAuthID {
 			continue
 		}
+		if !authIDAllowedByMetadata(candidate.ID, opts.Metadata) {
+			continue
+		}
 		if disallowFreeAuth && isFreeCodexAuth(candidate) {
 			continue
 		}
@@ -3172,6 +3240,9 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 			continue
 		}
 		if pinnedAuthID != "" && candidate.ID != pinnedAuthID {
+			continue
+		}
+		if !authIDAllowedByMetadata(candidate.ID, opts.Metadata) {
 			continue
 		}
 		if disallowFreeAuth && isFreeCodexAuth(candidate) {
@@ -3555,6 +3626,9 @@ func (m *Manager) pickNextViaHome(ctx context.Context, model string, opts clipro
 			_, alreadyTried := tried[pinnedAuthID]
 			if !alreadyTried {
 				if auth, executor, providerKey, ok := m.homeRuntimeAuthByID(executionSessionID, pinnedAuthID); ok {
+					if !authIDAllowedByMetadata(auth.ID, opts.Metadata) {
+						return nil, nil, "", &Error{Code: "auth_not_found", Message: "no auth available"}
+					}
 					return auth, executor, providerKey, nil
 				}
 			}
@@ -3615,6 +3689,9 @@ func (m *Manager) pickNextViaHome(ctx context.Context, model string, opts clipro
 	}
 	if strings.TrimSpace(auth.ID) == "" {
 		return nil, nil, "", &Error{Code: "invalid_auth", Message: "home returned auth without id", HTTPStatus: http.StatusBadGateway}
+	}
+	if !authIDAllowedByMetadata(auth.ID, opts.Metadata) {
+		return nil, nil, "", &Error{Code: "auth_not_found", Message: "no auth available"}
 	}
 	providerKey := strings.ToLower(strings.TrimSpace(auth.Provider))
 	if providerKey == "" {
@@ -3683,6 +3760,9 @@ func (m *Manager) findAllAntigravityCreditsCandidateAuths(routeModel string, opt
 			continue
 		}
 		if pinnedAuthID != "" && auth.ID != pinnedAuthID {
+			continue
+		}
+		if !authIDAllowedByMetadata(auth.ID, opts.Metadata) {
 			continue
 		}
 		if !strings.EqualFold(strings.TrimSpace(auth.Provider), "antigravity") {

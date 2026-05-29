@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -31,6 +32,37 @@ func (schedulerTestExecutor) CountTokens(ctx context.Context, auth *Auth, req cl
 }
 
 func (schedulerTestExecutor) HttpRequest(ctx context.Context, auth *Auth, req *http.Request) (*http.Response, error) {
+	return nil, nil
+}
+
+type allowedAuthCaptureExecutor struct {
+	executeAuthIDs []string
+	streamAuthIDs  []string
+}
+
+func (allowedAuthCaptureExecutor) Identifier() string { return "allowed-auth-capture" }
+
+func (e *allowedAuthCaptureExecutor) Execute(ctx context.Context, auth *Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	e.executeAuthIDs = append(e.executeAuthIDs, auth.ID)
+	return cliproxyexecutor.Response{Payload: []byte(`{}`)}, nil
+}
+
+func (e *allowedAuthCaptureExecutor) ExecuteStream(ctx context.Context, auth *Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+	e.streamAuthIDs = append(e.streamAuthIDs, auth.ID)
+	chunks := make(chan cliproxyexecutor.StreamChunk)
+	close(chunks)
+	return &cliproxyexecutor.StreamResult{Chunks: chunks}, nil
+}
+
+func (allowedAuthCaptureExecutor) Refresh(ctx context.Context, auth *Auth) (*Auth, error) {
+	return auth, nil
+}
+
+func (allowedAuthCaptureExecutor) CountTokens(ctx context.Context, auth *Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	return cliproxyexecutor.Response{}, nil
+}
+
+func (allowedAuthCaptureExecutor) HttpRequest(ctx context.Context, auth *Auth, req *http.Request) (*http.Response, error) {
 	return nil, nil
 }
 
@@ -92,6 +124,55 @@ func TestSchedulerPick_RoundRobinHighestPriority(t *testing.T) {
 		if got.ID != wantID {
 			t.Fatalf("pickSingle() #%d auth.ID = %q, want %q", index, got.ID, wantID)
 		}
+	}
+}
+
+func TestSchedulerPickSingleHonorsAllowedAuthIDs(t *testing.T) {
+	t.Parallel()
+
+	scheduler := newSchedulerForTest(
+		&RoundRobinSelector{},
+		&Auth{ID: "auth-a", Provider: "gemini"},
+		&Auth{ID: "auth-b", Provider: "gemini"},
+	)
+	opts := cliproxyexecutor.Options{
+		Metadata: map[string]any{
+			cliproxyexecutor.AllowedAuthIDsMetadataKey: []string{"auth-b"},
+		},
+	}
+
+	got, errPick := scheduler.pickSingle(context.Background(), "gemini", "", opts, nil)
+	if errPick != nil {
+		t.Fatalf("pickSingle() error = %v", errPick)
+	}
+	if got == nil || got.ID != "auth-b" {
+		t.Fatalf("pickSingle() auth = %v, want auth-b", got)
+	}
+}
+
+func TestSchedulerPickSingleEmptyAllowedAuthIDsDeniesAll(t *testing.T) {
+	t.Parallel()
+
+	scheduler := newSchedulerForTest(
+		&RoundRobinSelector{},
+		&Auth{ID: "auth-a", Provider: "gemini"},
+	)
+	opts := cliproxyexecutor.Options{
+		Metadata: map[string]any{
+			cliproxyexecutor.AllowedAuthIDsMetadataKey: []string{},
+		},
+	}
+
+	got, errPick := scheduler.pickSingle(context.Background(), "gemini", "", opts, nil)
+	if errPick == nil {
+		t.Fatalf("pickSingle() error = nil, want auth_not_found")
+	}
+	if got != nil {
+		t.Fatalf("pickSingle() auth = %v, want nil", got)
+	}
+	var authErr *Error
+	if !errors.As(errPick, &authErr) || authErr.Code != "auth_not_found" {
+		t.Fatalf("pickSingle() error = %v, want auth_not_found", errPick)
 	}
 }
 
@@ -330,6 +411,80 @@ func TestManager_PickNextMixed_UsesWeightedProviderRotationBeforeCredentialRotat
 		if got.ID != wantIDs[index] {
 			t.Fatalf("pickNextMixed() #%d auth.ID = %q, want %q", index, got.ID, wantIDs[index])
 		}
+	}
+}
+
+func TestManagerExecuteHonorsAllowedAuthIDs(t *testing.T) {
+	t.Parallel()
+
+	executor := &allowedAuthCaptureExecutor{}
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.executors["gemini"] = executor
+	if _, errRegister := manager.Register(context.Background(), &Auth{ID: "auth-a", Provider: "gemini"}); errRegister != nil {
+		t.Fatalf("Register(auth-a) error = %v", errRegister)
+	}
+	if _, errRegister := manager.Register(context.Background(), &Auth{ID: "auth-b", Provider: "gemini"}); errRegister != nil {
+		t.Fatalf("Register(auth-b) error = %v", errRegister)
+	}
+
+	opts := cliproxyexecutor.Options{
+		Metadata: map[string]any{cliproxyexecutor.AllowedAuthIDsMetadataKey: []string{"auth-b"}},
+	}
+	if _, errExecute := manager.Execute(context.Background(), []string{"gemini"}, cliproxyexecutor.Request{}, opts); errExecute != nil {
+		t.Fatalf("Execute() error = %v", errExecute)
+	}
+	if got := executor.executeAuthIDs; len(got) != 1 || got[0] != "auth-b" {
+		t.Fatalf("executeAuthIDs = %#v, want [auth-b]", got)
+	}
+}
+
+func TestManagerExecuteEmptyAllowedAuthIDsDeniesAll(t *testing.T) {
+	t.Parallel()
+
+	executor := &allowedAuthCaptureExecutor{}
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.executors["gemini"] = executor
+	if _, errRegister := manager.Register(context.Background(), &Auth{ID: "auth-a", Provider: "gemini"}); errRegister != nil {
+		t.Fatalf("Register(auth-a) error = %v", errRegister)
+	}
+
+	opts := cliproxyexecutor.Options{
+		Metadata: map[string]any{cliproxyexecutor.AllowedAuthIDsMetadataKey: []string{}},
+	}
+	_, errExecute := manager.Execute(context.Background(), []string{"gemini"}, cliproxyexecutor.Request{}, opts)
+	if errExecute == nil {
+		t.Fatalf("Execute() error = nil, want auth_not_found")
+	}
+	var authErr *Error
+	if !errors.As(errExecute, &authErr) || authErr.Code != "auth_not_found" {
+		t.Fatalf("Execute() error = %v, want auth_not_found", errExecute)
+	}
+	if len(executor.executeAuthIDs) != 0 {
+		t.Fatalf("executeAuthIDs = %#v, want no execution", executor.executeAuthIDs)
+	}
+}
+
+func TestManagerExecuteStreamHonorsAllowedAuthIDs(t *testing.T) {
+	t.Parallel()
+
+	executor := &allowedAuthCaptureExecutor{}
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.executors["gemini"] = executor
+	if _, errRegister := manager.Register(context.Background(), &Auth{ID: "auth-a", Provider: "gemini"}); errRegister != nil {
+		t.Fatalf("Register(auth-a) error = %v", errRegister)
+	}
+	if _, errRegister := manager.Register(context.Background(), &Auth{ID: "auth-b", Provider: "gemini"}); errRegister != nil {
+		t.Fatalf("Register(auth-b) error = %v", errRegister)
+	}
+
+	opts := cliproxyexecutor.Options{
+		Metadata: map[string]any{cliproxyexecutor.AllowedAuthIDsMetadataKey: []string{"auth-a"}},
+	}
+	if _, errStream := manager.ExecuteStream(context.Background(), []string{"gemini"}, cliproxyexecutor.Request{}, opts); errStream != nil {
+		t.Fatalf("ExecuteStream() error = %v", errStream)
+	}
+	if got := executor.streamAuthIDs; len(got) != 1 || got[0] != "auth-a" {
+		t.Fatalf("streamAuthIDs = %#v, want [auth-a]", got)
 	}
 }
 

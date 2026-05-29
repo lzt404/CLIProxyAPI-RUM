@@ -233,6 +233,102 @@ func requestExecutionMetadata(ctx context.Context) map[string]any {
 	return meta
 }
 
+func (h *BaseAPIHandler) requestExecutionMetadata(ctx context.Context) map[string]any {
+	meta := requestExecutionMetadata(ctx)
+	if h == nil || meta == nil {
+		return meta
+	}
+	apiKey := userAPIKeyFromContext(ctx)
+	if apiKey == "" || h.Cfg == nil {
+		return meta
+	}
+	rule, ok := apiKeyAccessRuleForKey(h.Cfg.APIKeyAccessRules, apiKey)
+	if !ok {
+		meta[coreexecutor.AllowedAuthIDsMetadataKey] = []string{}
+		return meta
+	}
+	meta[coreexecutor.AllowedAuthIDsMetadataKey] = h.allowedAuthIDsForAPIKeyAccessRule(rule)
+	return meta
+}
+
+func userAPIKeyFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	ginCtx, ok := ctx.Value("gin").(*gin.Context)
+	if !ok || ginCtx == nil {
+		return ""
+	}
+	raw, exists := ginCtx.Get("userApiKey")
+	if !exists || raw == nil {
+		return ""
+	}
+	switch value := raw.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case []byte:
+		return strings.TrimSpace(string(value))
+	default:
+		return ""
+	}
+}
+
+func apiKeyAccessRuleForKey(rules []config.APIKeyAccessRule, apiKey string) (config.APIKeyAccessRule, bool) {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" || len(rules) == 0 {
+		return config.APIKeyAccessRule{}, false
+	}
+	for _, rule := range rules {
+		if strings.TrimSpace(rule.APIKey) == apiKey {
+			return config.APIKeyAccessRule{
+				APIKey:             strings.TrimSpace(rule.APIKey),
+				AllowedAuthIndexes: config.NormalizeStringList(rule.AllowedAuthIndexes),
+				AllowedAuthIDs:     config.NormalizeStringList(rule.AllowedAuthIDs),
+			}, true
+		}
+	}
+	return config.APIKeyAccessRule{}, false
+}
+
+func (h *BaseAPIHandler) allowedAuthIDsForAPIKeyAccessRule(rule config.APIKeyAccessRule) []string {
+	allowed := make([]string, 0, len(rule.AllowedAuthIDs)+len(rule.AllowedAuthIndexes))
+	seen := make(map[string]struct{}, len(rule.AllowedAuthIDs)+len(rule.AllowedAuthIndexes))
+	add := func(authID string) {
+		authID = strings.TrimSpace(authID)
+		if authID == "" {
+			return
+		}
+		if _, exists := seen[authID]; exists {
+			return
+		}
+		seen[authID] = struct{}{}
+		allowed = append(allowed, authID)
+	}
+
+	for _, authID := range rule.AllowedAuthIDs {
+		add(authID)
+	}
+
+	allowedIndexes := config.NormalizeStringList(rule.AllowedAuthIndexes)
+	if len(allowedIndexes) > 0 && h != nil && h.AuthManager != nil {
+		indexes := make(map[string]struct{}, len(allowedIndexes))
+		for _, authIndex := range allowedIndexes {
+			indexes[authIndex] = struct{}{}
+		}
+		for _, auth := range h.AuthManager.List() {
+			if auth == nil {
+				continue
+			}
+			auth.EnsureIndex()
+			if _, ok := indexes[strings.TrimSpace(auth.Index)]; ok {
+				add(auth.ID)
+			}
+		}
+	}
+
+	return allowed
+}
+
 func setReasoningEffortMetadata(meta map[string]any, handlerType, model string, rawJSON []byte) {
 	if meta == nil {
 		return
@@ -576,7 +672,7 @@ func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType
 	if errMsg != nil {
 		return nil, nil, errMsg
 	}
-	reqMeta := requestExecutionMetadata(ctx)
+	reqMeta := h.requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
 	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)
@@ -626,7 +722,7 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 	if errMsg != nil {
 		return nil, nil, errMsg
 	}
-	reqMeta := requestExecutionMetadata(ctx)
+	reqMeta := h.requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
 	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)
@@ -689,7 +785,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManager(ctx context.Context, handl
 		close(errChan)
 		return nil, nil, errChan
 	}
-	reqMeta := requestExecutionMetadata(ctx)
+	reqMeta := h.requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
 	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)

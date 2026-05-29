@@ -39,7 +39,12 @@ type SDKConfig struct {
 	RequestLog bool `yaml:"request-log" json:"request-log"`
 
 	// APIKeys is a list of keys for authenticating clients to this proxy server.
+	// YAML accepts either plain strings or APIKeyEntry objects under api-keys.
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
+
+	// APIKeyAccessRules restrict authenticated client API keys to explicitly allowed upstream auth entries.
+	// It is populated from inline api-keys entries and the legacy api-key-access-rules section.
+	APIKeyAccessRules []APIKeyAccessRule `yaml:"api-key-access-rules,omitempty" json:"api-key-access-rules,omitempty"`
 
 	// PassthroughHeaders controls whether upstream response headers are forwarded to downstream clients.
 	// Default is false (disabled).
@@ -63,4 +68,24 @@ type StreamingConfig struct {
 	// to allow auth rotation / transient recovery.
 	// <= 0 disables bootstrap retries. Default is 0.
 	BootstrapRetries int `yaml:"bootstrap-retries,omitempty" json:"bootstrap-retries,omitempty"`
+}
+
+// APIKeyEntry is the user-facing api-keys object form.
+type APIKeyEntry struct {
+	// APIKey is the client API key used to authenticate with this proxy.
+	APIKey string `yaml:"api-key" json:"api-key"`
+	// AllowedAuthIndexes are stable auth_index values returned by the Management API.
+	AllowedAuthIndexes []string `yaml:"allowed-auth-indexes,omitempty" json:"allowed-auth-indexes,omitempty"`
+	// AllowedAuthIDs are optional internal auth IDs. AllowedAuthIndexes are preferred for user-facing config.
+	AllowedAuthIDs []string `yaml:"allowed-auth-ids,omitempty" json:"allowed-auth-ids,omitempty"`
+}
+
+// APIKeyAccessRule maps one proxy client API key to the upstream credentials it may use.
+type APIKeyAccessRule struct {
+	// APIKey is the client API key from top-level api-keys.
+	APIKey string `yaml:"api-key" json:"api-key"`
+	// AllowedAuthIndexes are stable auth_index values returned by the Management API.
+	AllowedAuthIndexes []string `yaml:"allowed-auth-indexes,omitempty" json:"allowed-auth-indexes,omitempty"`
+	// AllowedAuthIDs are optional internal auth IDs. AllowedAuthIndexes are preferred for user-facing config.
+	AllowedAuthIDs []string `yaml:"allowed-auth-ids,omitempty" json:"allowed-auth-ids,omitempty"`
 }

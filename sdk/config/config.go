@@ -14,6 +14,8 @@ type StreamingConfig = internalconfig.StreamingConfig
 type TLSConfig = internalconfig.TLSConfig
 type RemoteManagement = internalconfig.RemoteManagement
 type AmpCode = internalconfig.AmpCode
+type APIKeyEntry = internalconfig.APIKeyEntry
+type APIKeyAccessRule = internalconfig.APIKeyAccessRule
 type OAuthModelAlias = internalconfig.OAuthModelAlias
 type PayloadConfig = internalconfig.PayloadConfig
 type PayloadRule = internalconfig.PayloadRule
@@ -49,6 +51,10 @@ func SaveConfigPreserveComments(configFile string, cfg *Config) error {
 
 func SaveConfigPreserveCommentsUpdateNestedScalar(configFile string, path []string, value string) error {
 	return internalconfig.SaveConfigPreserveCommentsUpdateNestedScalar(configFile, path, value)
+}
+
+func NormalizeStringList(values []string) []string {
+	return internalconfig.NormalizeStringList(values)
 }
 
 func NormalizeCommentIndentation(data []byte) []byte {

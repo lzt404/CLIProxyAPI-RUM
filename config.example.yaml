@@ -35,11 +35,14 @@ remote-management:
 # Authentication directory (supports ~ for home directory)
 auth-dir: "~/.cli-proxy-api"
 
-# API keys for authentication
+# API keys for authentication and per-key upstream credential access.
+# Client keys cannot use any upstream credential unless it is listed in the same api-keys entry.
+# Use auth_index from GET /v0/management/auth-files or auth-index fields returned by API-key config endpoints.
 api-keys:
   - "your-api-key-1"
-  - "your-api-key-2"
-  - "your-api-key-3"
+  - api-key: "restricted-api-key"
+    allowed-auth-indexes:
+      - "auth-index-from-management-api"
 
 # Enable debug logging
 debug: false

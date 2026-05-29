@@ -106,6 +106,9 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	} else if !reflect.DeepEqual(trimStrings(oldCfg.APIKeys), trimStrings(newCfg.APIKeys)) {
 		changes = append(changes, "api-keys: values updated (count unchanged, redacted)")
 	}
+	if !equalAPIKeyAccessRules(oldCfg.APIKeyAccessRules, newCfg.APIKeyAccessRules) {
+		changes = append(changes, fmt.Sprintf("api-key-access-rules: updated (%d -> %d entries)", len(oldCfg.APIKeyAccessRules), len(newCfg.APIKeyAccessRules)))
+	}
 	if len(oldCfg.GeminiKey) != len(newCfg.GeminiKey) {
 		changes = append(changes, fmt.Sprintf("gemini-api-key count: %d -> %d", len(oldCfg.GeminiKey), len(newCfg.GeminiKey)))
 	} else {
@@ -441,6 +444,24 @@ func equalUpstreamAPIKeys(a, b []config.AmpUpstreamAPIKeyEntry) bool {
 			return false
 		}
 		if !equalStringSet(a[i].APIKeys, b[i].APIKeys) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalAPIKeyAccessRules(a, b []config.APIKeyAccessRule) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if strings.TrimSpace(a[i].APIKey) != strings.TrimSpace(b[i].APIKey) {
+			return false
+		}
+		if !equalStringSet(a[i].AllowedAuthIndexes, b[i].AllowedAuthIndexes) {
+			return false
+		}
+		if !equalStringSet(a[i].AllowedAuthIDs, b[i].AllowedAuthIDs) {
 			return false
 		}
 	}

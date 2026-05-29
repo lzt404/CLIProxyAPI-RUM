@@ -3,6 +3,7 @@ package management
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -105,17 +106,280 @@ func (h *Handler) deleteFromStringList(c *gin.Context, target *[]string, after f
 }
 
 // api-keys
-func (h *Handler) GetAPIKeys(c *gin.Context) { c.JSON(200, gin.H{"api-keys": h.cfg.APIKeys}) }
+func (h *Handler) GetAPIKeys(c *gin.Context) {
+	if h == nil || h.cfg == nil {
+		c.JSON(200, gin.H{"api-keys": []string{}, "api-key-entries": []config.APIKeyEntry{}})
+		return
+	}
+	c.JSON(200, gin.H{
+		"api-keys":        h.cfg.APIKeys,
+		"api-key-entries": h.cfg.APIKeyEntries(),
+	})
+}
 func (h *Handler) PutAPIKeys(c *gin.Context) {
+	data, err := c.GetRawData()
+	if err != nil {
+		c.JSON(400, gin.H{"error": "failed to read body"})
+		return
+	}
+	if keys, rules, ok, errParse := parseAPIKeyEntriesPayload(data); ok || errParse != nil {
+		if errParse != nil {
+			c.JSON(400, gin.H{"error": "invalid body"})
+			return
+		}
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.cfg.APIKeys = keys
+		h.cfg.APIKeyAccessRules = rules
+		h.cfg.SanitizeAPIKeyAccessRules()
+		h.persistLocked(c)
+		return
+	}
+
+	c.Request.Body = io.NopCloser(strings.NewReader(string(data)))
 	h.putStringList(c, func(v []string) {
 		h.cfg.APIKeys = append([]string(nil), v...)
+		h.cfg.SanitizeAPIKeyAccessRules()
 	}, nil)
 }
 func (h *Handler) PatchAPIKeys(c *gin.Context) {
-	h.patchStringList(c, &h.cfg.APIKeys, func() {})
+	data, err := c.GetRawData()
+	if err != nil {
+		c.JSON(400, gin.H{"error": "failed to read body"})
+		return
+	}
+	if keyEntry, ok, errParse := parseAPIKeyEntryPatchPayload(data); ok || errParse != nil {
+		if errParse != nil {
+			c.JSON(400, gin.H{"error": "invalid body"})
+			return
+		}
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		patchAPIKeyEntry(h.cfg, keyEntry.index, keyEntry.oldKey, keyEntry.entry)
+		h.cfg.SanitizeAPIKeyAccessRules()
+		h.persistLocked(c)
+		return
+	}
+	c.Request.Body = io.NopCloser(strings.NewReader(string(data)))
+	h.patchStringList(c, &h.cfg.APIKeys, func() { h.cfg.SanitizeAPIKeyAccessRules() })
 }
 func (h *Handler) DeleteAPIKeys(c *gin.Context) {
-	h.deleteFromStringList(c, &h.cfg.APIKeys, func() {})
+	h.deleteFromStringList(c, &h.cfg.APIKeys, func() { h.pruneAPIKeyAccessRules() })
+}
+
+type apiKeyEntryPatch struct {
+	index  *int
+	oldKey string
+	entry  config.APIKeyEntry
+}
+
+func parseAPIKeyEntriesPayload(data []byte) ([]string, []config.APIKeyAccessRule, bool, error) {
+	rawItems, ok, err := apiKeyEntryRawItems(data)
+	if err != nil || !ok {
+		return nil, nil, ok, err
+	}
+
+	keys := make([]string, 0, len(rawItems))
+	rules := make([]config.APIKeyAccessRule, 0, len(rawItems))
+	hasObject := false
+	for _, raw := range rawItems {
+		var key string
+		if err = json.Unmarshal(raw, &key); err == nil {
+			key = strings.TrimSpace(key)
+			if key != "" {
+				keys = append(keys, key)
+			}
+			continue
+		}
+
+		entry, errEntry := parseAPIKeyEntryObject(raw)
+		if errEntry != nil {
+			return nil, nil, true, errEntry
+		}
+		hasObject = true
+		key = strings.TrimSpace(entry.APIKey)
+		if key == "" {
+			continue
+		}
+		keys = append(keys, key)
+		rules = append(rules, config.APIKeyAccessRule{
+			APIKey:             key,
+			AllowedAuthIndexes: config.NormalizeStringList(entry.AllowedAuthIndexes),
+			AllowedAuthIDs:     config.NormalizeStringList(entry.AllowedAuthIDs),
+		})
+	}
+	if !hasObject {
+		return nil, nil, false, nil
+	}
+	return keys, config.NormalizeAPIKeyAccessRules(rules), true, nil
+}
+
+func apiKeyEntryRawItems(data []byte) ([]json.RawMessage, bool, error) {
+	var rawItems []json.RawMessage
+	if err := json.Unmarshal(data, &rawItems); err == nil {
+		return rawItems, true, nil
+	}
+	var wrapper struct {
+		Value []json.RawMessage `json:"value"`
+		Items []json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return nil, false, nil
+	}
+	if wrapper.Value != nil {
+		return wrapper.Value, true, nil
+	}
+	if wrapper.Items != nil {
+		return wrapper.Items, true, nil
+	}
+	return nil, false, nil
+}
+
+func parseAPIKeyEntryPatchPayload(data []byte) (apiKeyEntryPatch, bool, error) {
+	var body struct {
+		Index *int            `json:"index"`
+		Old   string          `json:"old"`
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil || len(body.Value) == 0 {
+		return apiKeyEntryPatch{}, false, nil
+	}
+	entry, err := parseAPIKeyEntryObject(body.Value)
+	if err != nil {
+		return apiKeyEntryPatch{}, true, err
+	}
+	return apiKeyEntryPatch{
+		index:  body.Index,
+		oldKey: strings.TrimSpace(body.Old),
+		entry:  entry,
+	}, true, nil
+}
+
+func parseAPIKeyEntryObject(raw json.RawMessage) (config.APIKeyEntry, error) {
+	var payload struct {
+		APIKeyHyphen              string   `json:"api-key"`
+		APIKeyCamel               string   `json:"apiKey"`
+		Key                       string   `json:"key"`
+		AllowedAuthIndexesHyphen  []string `json:"allowed-auth-indexes"`
+		AllowedAuthIndexesCamel   []string `json:"allowedAuthIndexes"`
+		AllowedAuthIDsHyphen      []string `json:"allowed-auth-ids"`
+		AllowedAuthIDsCamel       []string `json:"allowedAuthIds"`
+		AllowedAuthIDsCapitalized []string `json:"allowedAuthIDs"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return config.APIKeyEntry{}, err
+	}
+	apiKey := firstNonEmpty(payload.APIKeyHyphen, payload.APIKeyCamel, payload.Key)
+	return config.APIKeyEntry{
+		APIKey:             apiKey,
+		AllowedAuthIndexes: firstNonEmptyStringSlice(payload.AllowedAuthIndexesHyphen, payload.AllowedAuthIndexesCamel),
+		AllowedAuthIDs: firstNonEmptyStringSlice(
+			payload.AllowedAuthIDsHyphen,
+			payload.AllowedAuthIDsCamel,
+			payload.AllowedAuthIDsCapitalized,
+		),
+	}, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyStringSlice(values ...[]string) []string {
+	for _, value := range values {
+		if len(config.NormalizeStringList(value)) > 0 {
+			return value
+		}
+	}
+	return nil
+}
+
+func patchAPIKeyEntry(cfg *config.Config, index *int, oldKey string, entry config.APIKeyEntry) {
+	if cfg == nil {
+		return
+	}
+	nextKey := strings.TrimSpace(entry.APIKey)
+	if nextKey == "" {
+		return
+	}
+	previousKey := oldKey
+	if index != nil && *index >= 0 && *index < len(cfg.APIKeys) {
+		previousKey = strings.TrimSpace(cfg.APIKeys[*index])
+		cfg.APIKeys[*index] = nextKey
+	} else if previousKey != "" {
+		replaced := false
+		for i := range cfg.APIKeys {
+			if strings.TrimSpace(cfg.APIKeys[i]) == previousKey {
+				cfg.APIKeys[i] = nextKey
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			cfg.APIKeys = append(cfg.APIKeys, nextKey)
+		}
+	} else {
+		found := false
+		for _, existing := range cfg.APIKeys {
+			if strings.TrimSpace(existing) == nextKey {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.APIKeys = append(cfg.APIKeys, nextKey)
+		}
+	}
+	if previousKey != "" && previousKey != nextKey {
+		removeAPIKeyAccessRule(cfg, previousKey)
+	}
+	cfg.APIKeyAccessRules = config.MergeAPIKeyAccessRules(cfg.APIKeyAccessRules, []config.APIKeyAccessRule{{
+		APIKey:             nextKey,
+		AllowedAuthIndexes: config.NormalizeStringList(entry.AllowedAuthIndexes),
+		AllowedAuthIDs:     config.NormalizeStringList(entry.AllowedAuthIDs),
+	}})
+}
+
+func removeAPIKeyAccessRule(cfg *config.Config, apiKey string) {
+	if cfg == nil {
+		return
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return
+	}
+	out := make([]config.APIKeyAccessRule, 0, len(cfg.APIKeyAccessRules))
+	for _, rule := range cfg.APIKeyAccessRules {
+		if strings.TrimSpace(rule.APIKey) == apiKey {
+			continue
+		}
+		out = append(out, rule)
+	}
+	cfg.APIKeyAccessRules = out
+}
+
+func (h *Handler) pruneAPIKeyAccessRules() {
+	if h == nil || h.cfg == nil {
+		return
+	}
+	active := make(map[string]struct{}, len(h.cfg.APIKeys))
+	for _, key := range h.cfg.APIKeys {
+		if trimmed := strings.TrimSpace(key); trimmed != "" {
+			active[trimmed] = struct{}{}
+		}
+	}
+	out := make([]config.APIKeyAccessRule, 0, len(h.cfg.APIKeyAccessRules))
+	for _, rule := range h.cfg.APIKeyAccessRules {
+		if _, ok := active[strings.TrimSpace(rule.APIKey)]; ok {
+			out = append(out, rule)
+		}
+	}
+	h.cfg.APIKeyAccessRules = config.NormalizeAPIKeyAccessRules(out)
 }
 
 // gemini-api-key: []GeminiKey

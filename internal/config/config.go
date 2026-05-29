@@ -149,6 +149,28 @@ type Config struct {
 	legacyMigrationPending bool `yaml:"-" json:"-"`
 }
 
+// UnmarshalYAML accepts both legacy scalar api-keys entries and the inline
+// object form that carries per-client credential access rules.
+func (cfg *Config) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil {
+		return nil
+	}
+
+	cloned := deepCopyNode(value)
+	inlineRules := extractInlineAPIKeyAccessRules(cloned)
+
+	type configAlias Config
+	var decoded configAlias
+	if err := cloned.Decode(&decoded); err != nil {
+		return err
+	}
+	*cfg = Config(decoded)
+	if len(inlineRules) > 0 {
+		cfg.APIKeyAccessRules = MergeAPIKeyAccessRules(cfg.APIKeyAccessRules, inlineRules)
+	}
+	return nil
+}
+
 // ClaudeHeaderDefaults configures default header values injected into Claude API requests.
 // In legacy mode, UserAgent/PackageVersion/RuntimeVersion/Timeout act as fallbacks when
 // the client omits them, while OS/Arch remain runtime-derived. When stabilized device
@@ -734,6 +756,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Sanitize OpenAI compatibility providers: drop entries without base-url
 	cfg.SanitizeOpenAICompatibility()
 
+	// Normalize API key access rules.
+	cfg.SanitizeAPIKeyAccessRules()
+
 	// Normalize OAuth provider model exclusion map.
 	cfg.OAuthExcludedModels = NormalizeOAuthExcludedModels(cfg.OAuthExcludedModels)
 
@@ -815,6 +840,304 @@ func payloadRawString(value any) ([]byte, bool) {
 	default:
 		return nil, false
 	}
+}
+
+// APIKeyEntries returns api-keys in the inline object form used by management clients.
+func (cfg *Config) APIKeyEntries() []APIKeyEntry {
+	if cfg == nil {
+		return nil
+	}
+	return APIKeyEntriesFrom(cfg.APIKeys, cfg.APIKeyAccessRules)
+}
+
+// APIKeyEntriesFrom combines client API keys with their access rules.
+func APIKeyEntriesFrom(keys []string, rules []APIKeyAccessRule) []APIKeyEntry {
+	if len(keys) == 0 {
+		return nil
+	}
+	rulesByKey := make(map[string]APIKeyAccessRule, len(rules))
+	for _, rule := range NormalizeAPIKeyAccessRules(rules) {
+		rulesByKey[strings.TrimSpace(rule.APIKey)] = rule
+	}
+	out := make([]APIKeyEntry, 0, len(keys))
+	for _, rawKey := range keys {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			continue
+		}
+		entry := APIKeyEntry{APIKey: key}
+		if rule, ok := rulesByKey[key]; ok {
+			entry.AllowedAuthIndexes = NormalizeStringList(rule.AllowedAuthIndexes)
+			entry.AllowedAuthIDs = NormalizeStringList(rule.AllowedAuthIDs)
+		}
+		out = append(out, entry)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// SanitizeAPIKeyAccessRules normalizes and deduplicates client API key access rules.
+func (cfg *Config) SanitizeAPIKeyAccessRules() {
+	if cfg == nil {
+		return
+	}
+	rules := NormalizeAPIKeyAccessRules(cfg.APIKeyAccessRules)
+	seen := make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		seen[strings.TrimSpace(rule.APIKey)] = struct{}{}
+	}
+	for _, rawKey := range cfg.APIKeys {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		rules = append(rules, APIKeyAccessRule{APIKey: key})
+		seen[key] = struct{}{}
+	}
+	cfg.APIKeyAccessRules = NormalizeAPIKeyAccessRules(rules)
+}
+
+// NormalizeAPIKeyAccessRules trims rule fields and keeps the first rule for each client API key.
+// A rule with no allowed auth entries is preserved and means the client key is explicitly denied.
+func NormalizeAPIKeyAccessRules(entries []APIKeyAccessRule) []APIKeyAccessRule {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]APIKeyAccessRule, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		apiKey := strings.TrimSpace(entry.APIKey)
+		if apiKey == "" {
+			continue
+		}
+		if _, exists := seen[apiKey]; exists {
+			log.Warn("api-key-access-rules: client API key appears in multiple entries; using first rule.")
+			continue
+		}
+		seen[apiKey] = struct{}{}
+		out = append(out, APIKeyAccessRule{
+			APIKey:             apiKey,
+			AllowedAuthIndexes: NormalizeStringList(entry.AllowedAuthIndexes),
+			AllowedAuthIDs:     NormalizeStringList(entry.AllowedAuthIDs),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// MergeAPIKeyAccessRules combines existing rules with updates, replacing by client API key.
+func MergeAPIKeyAccessRules(existing, updates []APIKeyAccessRule) []APIKeyAccessRule {
+	current := NormalizeAPIKeyAccessRules(existing)
+	indexByKey := make(map[string]int, len(current))
+	for i := range current {
+		indexByKey[strings.TrimSpace(current[i].APIKey)] = i
+	}
+	for _, update := range NormalizeAPIKeyAccessRules(updates) {
+		key := strings.TrimSpace(update.APIKey)
+		if key == "" {
+			continue
+		}
+		if idx, ok := indexByKey[key]; ok {
+			current[idx] = update
+			continue
+		}
+		current = append(current, update)
+		indexByKey[key] = len(current) - 1
+	}
+	return NormalizeAPIKeyAccessRules(current)
+}
+
+// NormalizeStringList trims, filters, and deduplicates string lists while preserving order.
+func NormalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func extractInlineAPIKeyAccessRules(root *yaml.Node) []APIKeyAccessRule {
+	if root == nil {
+		return nil
+	}
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		root = root.Content[0]
+	}
+	if root == nil || root.Kind != yaml.MappingNode {
+		return nil
+	}
+	idx := findMapKeyIndex(root, "api-keys")
+	if idx < 0 || idx+1 >= len(root.Content) {
+		return nil
+	}
+	seq := root.Content[idx+1]
+	if seq == nil || seq.Kind != yaml.SequenceNode {
+		return nil
+	}
+
+	rules := make([]APIKeyAccessRule, 0, len(seq.Content))
+	for i, item := range seq.Content {
+		if item == nil || item.Kind != yaml.MappingNode {
+			continue
+		}
+		apiKey := strings.TrimSpace(yamlMappingScalarValue(item, "api-key"))
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(yamlMappingScalarValue(item, "apiKey"))
+		}
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(yamlMappingScalarValue(item, "key"))
+		}
+		if apiKey == "" {
+			continue
+		}
+		rules = append(rules, APIKeyAccessRule{
+			APIKey:             apiKey,
+			AllowedAuthIndexes: yamlMappingStringList(item, "allowed-auth-indexes", "allowedAuthIndexes"),
+			AllowedAuthIDs:     yamlMappingStringList(item, "allowed-auth-ids", "allowedAuthIds"),
+		})
+		seq.Content[i] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: apiKey}
+	}
+	return NormalizeAPIKeyAccessRules(rules)
+}
+
+func yamlMappingStringList(mapNode *yaml.Node, keys ...string) []string {
+	for _, key := range keys {
+		idx := findMapKeyIndex(mapNode, key)
+		if idx < 0 || idx+1 >= len(mapNode.Content) {
+			continue
+		}
+		values := yamlStringList(mapNode.Content[idx+1])
+		if len(values) > 0 {
+			return values
+		}
+	}
+	return nil
+}
+
+func yamlStringList(node *yaml.Node) []string {
+	if node == nil {
+		return nil
+	}
+	switch node.Kind {
+	case yaml.SequenceNode:
+		values := make([]string, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item == nil {
+				continue
+			}
+			value := strings.TrimSpace(item.Value)
+			if value != "" {
+				values = append(values, value)
+			}
+		}
+		return NormalizeStringList(values)
+	case yaml.ScalarNode:
+		return NormalizeStringList(strings.FieldsFunc(node.Value, func(r rune) bool {
+			return r == ',' || r == '\n' || r == '\r'
+		}))
+	default:
+		return nil
+	}
+}
+
+func yamlMappingScalarValue(mapNode *yaml.Node, key string) string {
+	idx := findMapKeyIndex(mapNode, key)
+	if idx < 0 || idx+1 >= len(mapNode.Content) || mapNode.Content[idx+1] == nil {
+		return ""
+	}
+	return mapNode.Content[idx+1].Value
+}
+
+func inlineAPIKeyAccessRulesForSave(root *yaml.Node, cfg *Config) {
+	if root == nil || root.Kind != yaml.MappingNode {
+		return
+	}
+	removeMapKey(root, "api-key-access-rules")
+	if cfg == nil || len(cfg.APIKeys) == 0 || len(cfg.APIKeyAccessRules) == 0 {
+		return
+	}
+
+	rulesByKey := make(map[string]APIKeyAccessRule, len(cfg.APIKeyAccessRules))
+	for _, rule := range NormalizeAPIKeyAccessRules(cfg.APIKeyAccessRules) {
+		rulesByKey[strings.TrimSpace(rule.APIKey)] = rule
+	}
+	if len(rulesByKey) == 0 {
+		return
+	}
+
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, rawKey := range cfg.APIKeys {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			continue
+		}
+		entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		appendYAMLScalarPair(entry, "api-key", key)
+		if rule, ok := rulesByKey[key]; ok {
+			if indexes := NormalizeStringList(rule.AllowedAuthIndexes); len(indexes) > 0 {
+				appendYAMLStringListPair(entry, "allowed-auth-indexes", indexes)
+			}
+			if ids := NormalizeStringList(rule.AllowedAuthIDs); len(ids) > 0 {
+				appendYAMLStringListPair(entry, "allowed-auth-ids", ids)
+			}
+		}
+		seq.Content = append(seq.Content, entry)
+	}
+	if len(seq.Content) == 0 {
+		return
+	}
+
+	valueNode := getOrCreateMapValue(root, "api-keys")
+	*valueNode = *seq
+}
+
+func appendYAMLScalarPair(mapNode *yaml.Node, key, value string) {
+	mapNode.Content = append(
+		mapNode.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value},
+	)
+}
+
+func appendYAMLStringListPair(mapNode *yaml.Node, key string, values []string) {
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: trimmed})
+	}
+	if len(seq.Content) == 0 {
+		return
+	}
+	mapNode.Content = append(
+		mapNode.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		seq,
+	)
 }
 
 // SanitizeCodexHeaderDefaults trims surrounding whitespace from the
@@ -1065,6 +1388,9 @@ func hashSecret(secret string) (string, error) {
 // SaveConfigPreserveComments writes the config back to YAML while preserving existing comments
 // and key ordering by loading the original file into a yaml.Node tree and updating values in-place.
 func SaveConfigPreserveComments(configFile string, cfg *Config) error {
+	if cfg != nil {
+		cfg.SanitizeAPIKeyAccessRules()
+	}
 	persistCfg := cfg
 	// Load original YAML as a node tree to preserve comments and ordering.
 	data, err := os.ReadFile(configFile)
@@ -1098,12 +1424,14 @@ func SaveConfigPreserveComments(configFile string, cfg *Config) error {
 	if generated.Content[0].Kind != yaml.MappingNode {
 		return fmt.Errorf("expected generated root mapping node")
 	}
+	inlineAPIKeyAccessRulesForSave(generated.Content[0], cfg)
 
 	// Remove deprecated sections before merging back the sanitized config.
 	removeLegacyAuthBlock(original.Content[0])
 	removeLegacyOpenAICompatAPIKeys(original.Content[0])
 	removeLegacyAmpKeys(original.Content[0])
 	removeLegacyGenerativeLanguageKeys(original.Content[0])
+	removeMapKey(original.Content[0], "api-key-access-rules")
 
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-excluded-models")
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-model-alias")

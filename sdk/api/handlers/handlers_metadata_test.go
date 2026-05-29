@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 	"golang.org/x/net/context"
 )
 
@@ -59,4 +63,65 @@ func TestSetServiceTierMetadataDefaultsWhenMissing(t *testing.T) {
 	if gotServiceTier != "default" {
 		t.Fatalf("ServiceTierMetadataKey = %v, want %q", gotServiceTier, "default")
 	}
+}
+
+func TestBaseAPIHandlerRequestExecutionMetadataAllowsConfiguredAuthIndex(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth := &coreauth.Auth{
+		ID:       "auth-1",
+		Provider: "codex",
+		FileName: "codex-auth.json",
+	}
+	authIndex := auth.EnsureIndex()
+	if _, err := manager.Register(context.Background(), auth); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{
+		APIKeyAccessRules: []sdkconfig.APIKeyAccessRule{
+			{APIKey: "client-key", AllowedAuthIndexes: []string{authIndex}},
+		},
+	}, manager)
+
+	meta := handler.requestExecutionMetadata(contextWithUserAPIKey("client-key"))
+	got, ok := meta[coreexecutor.AllowedAuthIDsMetadataKey].([]string)
+	if !ok || len(got) != 1 || got[0] != "auth-1" {
+		t.Fatalf("AllowedAuthIDsMetadataKey = %#v, want [auth-1]", meta[coreexecutor.AllowedAuthIDsMetadataKey])
+	}
+}
+
+func TestBaseAPIHandlerRequestExecutionMetadataDeniesAPIKeyWithoutRule(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{
+		APIKeyAccessRules: []sdkconfig.APIKeyAccessRule{
+			{APIKey: "other-key", AllowedAuthIDs: []string{"auth-1"}},
+		},
+	}, nil)
+
+	meta := handler.requestExecutionMetadata(contextWithUserAPIKey("client-key"))
+	got, ok := meta[coreexecutor.AllowedAuthIDsMetadataKey].([]string)
+	if !ok || len(got) != 0 {
+		t.Fatalf("AllowedAuthIDsMetadataKey = %#v, want empty allowlist", meta[coreexecutor.AllowedAuthIDsMetadataKey])
+	}
+}
+
+func TestBaseAPIHandlerRequestExecutionMetadataDeniesEmptyAllowlist(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{
+		APIKeyAccessRules: []sdkconfig.APIKeyAccessRule{{APIKey: "client-key"}},
+	}, nil)
+
+	meta := handler.requestExecutionMetadata(contextWithUserAPIKey("client-key"))
+	got, ok := meta[coreexecutor.AllowedAuthIDsMetadataKey].([]string)
+	if !ok || len(got) != 0 {
+		t.Fatalf("AllowedAuthIDsMetadataKey = %#v, want empty allowlist", meta[coreexecutor.AllowedAuthIDsMetadataKey])
+	}
+}
+
+func contextWithUserAPIKey(apiKey string) context.Context {
+	ginCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ginCtx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ginCtx.Set("userApiKey", apiKey)
+	return context.WithValue(context.Background(), "gin", ginCtx)
 }

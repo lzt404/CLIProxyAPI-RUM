@@ -600,6 +600,10 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/api-keys", s.mgmt.PutAPIKeys)
 		mgmt.PATCH("/api-keys", s.mgmt.PatchAPIKeys)
 		mgmt.DELETE("/api-keys", s.mgmt.DeleteAPIKeys)
+		mgmt.GET("/api-key-access-rules", s.mgmt.GetAPIKeyAccessRules)
+		mgmt.PUT("/api-key-access-rules", s.mgmt.PutAPIKeyAccessRules)
+		mgmt.PATCH("/api-key-access-rules", s.mgmt.PatchAPIKeyAccessRules)
+		mgmt.DELETE("/api-key-access-rules", s.mgmt.DeleteAPIKeyAccessRules)
 		mgmt.GET("/api-key-usage", s.mgmt.GetAPIKeyUsage)
 		mgmt.GET("/usage-queue", s.mgmt.GetUsageQueue)
 

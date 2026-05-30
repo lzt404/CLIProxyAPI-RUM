@@ -5,6 +5,10 @@ Go 1.26+ proxy server providing OpenAI/Gemini/Claude/Codex compatible APIs with 
 ## Repository
 - GitHub: https://github.com/router-for-me/CLIProxyAPI
 
+## Release
+- RUM fork release tags must keep the `-rum.N` suffix. For example, after upstream `v7.1.31`, use `v7.1.31-rum.1`; increment `N` for additional RUM releases based on the same upstream version.
+- Release archives should include the full tag in the filename and contain the executable named `cli-proxy-api` (`cli-proxy-api.exe` on Windows).
+
 ## Commands
 ```bash
 gofmt -w . # Format (required after Go changes)

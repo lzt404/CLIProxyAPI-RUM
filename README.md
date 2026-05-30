@@ -162,11 +162,11 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The release workflow uploads compiled executable files directly for Linux,
-Windows, macOS, and FreeBSD. The regular build workflow also runs on pull
-requests, pushes to `main`, and manual dispatch from the GitHub Actions page.
-Release assets are packaged per platform as a single archive (zip/tar.gz) with
-no top-level directory inside, for example `cli-proxy-rum_linux_amd64.tar.gz`.
+The release workflow packages the `cli-proxy-api` executable for Linux, Windows,
+macOS, and FreeBSD. The regular build workflow also runs on pull requests,
+pushes to `main`, and manual dispatch from the GitHub Actions page. Release
+asset names include the full tag, for example
+`cli-proxy-api_v7.1.31-rum.1_windows_amd64.zip`.
 
 ## Contributing
 

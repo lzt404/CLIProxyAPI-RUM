@@ -75,7 +75,7 @@ jobs:
           mkdir -p dist/package
           go build \
             -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" \
-            -o "dist/package/cli-proxy-api${BIN_EXT}" \
+            -o "dist/package/cli-proxy-api-rum${BIN_EXT}" \
             ./cmd/server
           cp config.example.yaml dist/package/config.example.yaml
       - name: Create archive
@@ -86,7 +86,7 @@ jobs:
           ARCHIVE_EXT: ${{ matrix.archive_ext }}
         run: |
           set -euo pipefail
-          archive_name="cli-proxy-api_${VERSION}_${GOOS}_${GOARCH}.${ARCHIVE_EXT}"
+          archive_name="cli-proxy-api-rum_${VERSION}_${GOOS}_${GOARCH}.${ARCHIVE_EXT}"
           rm -f "dist/${archive_name}"
           if [ "${ARCHIVE_EXT}" = "zip" ]; then
             (cd dist/package && zip -qr "../${archive_name}" .)
@@ -95,8 +95,8 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: cli-proxy-api_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: dist/cli-proxy-api_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.archive_ext }}
+          name: cli-proxy-api-rum_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/cli-proxy-api-rum_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.archive_ext }}
           if-no-files-found: error
 
   release:

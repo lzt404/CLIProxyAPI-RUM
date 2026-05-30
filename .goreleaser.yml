@@ -1,9 +1,9 @@
 version: 2
 
-project_name: CLIProxyAPI
+project_name: cli-proxy-api-rum
 
 builds:
-  - id: "cli-proxy-api"
+  - id: "cli-proxy-api-rum"
     env:
       - CGO_ENABLED=0
     goos:
@@ -15,11 +15,11 @@ builds:
       - amd64
       - arm64
     main: ./cmd/server/
-    binary: cli-proxy-api
+    binary: cli-proxy-api-rum
     ldflags:
       - -s -w -X 'main.Version={{.Version}}' -X 'main.Commit={{.ShortCommit}}' -X 'main.BuildDate={{.Date}}'
 archives:
-  - id: "cli-proxy-api"
+  - id: "cli-proxy-api-rum"
     formats:
       - tar.gz
     name_template: >-

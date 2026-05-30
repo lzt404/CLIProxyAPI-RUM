@@ -25,7 +25,7 @@ OpenAI-compatible upstream providers.
 Build the server:
 
 ```bash
-go build -o cli-proxy-api ./cmd/server
+go build -o cli-proxy-api-rum ./cmd/server
 ```
 
 Run with the default `config.yaml`:
@@ -162,11 +162,11 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The release workflow packages the `cli-proxy-api` executable for Linux, Windows,
-macOS, and FreeBSD. The regular build workflow also runs on pull requests,
-pushes to `main`, and manual dispatch from the GitHub Actions page. Release
-asset names include the full tag, for example
-`cli-proxy-api_v7.1.31-rum.1_windows_amd64.zip`.
+The release workflow packages the `cli-proxy-api-rum` executable for Linux,
+Windows, macOS, and FreeBSD. The regular build workflow also runs on pull
+requests, pushes to `main`, and manual dispatch from the GitHub Actions page.
+Release asset names include the full tag, for example
+`cli-proxy-api-rum_v7.1.31-rum.2_windows_amd64.zip`.
 
 ## Contributing
 

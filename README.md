@@ -7,18 +7,68 @@ Grok, and compatible API surfaces for CLI tools, SDKs, and local applications.
 It can route requests to OAuth-backed accounts, configured API keys, and
 OpenAI-compatible upstream providers.
 
-## Features
+So you can use local or multi-account CLI access with OpenAI(include Responses)/Gemini/Claude-compatible clients and SDKs.
 
-- OpenAI-compatible chat, responses, and related API endpoints.
-- Gemini, Claude, Codex, Grok, and OpenAI-compatible upstream routing.
-- OAuth login flows for supported CLI account providers.
-- Multi-account scheduling with round-robin and fill-first routing strategies.
-- Streaming, non-streaming, and WebSocket execution paths where supported.
-- Function calling, tools, and multimodal input support.
-- Per-client API key access control for upstream credentials and provider API keys.
-- Amp CLI and Amp IDE extension routing support.
-- Management API for configuration, OAuth files, provider keys, and runtime state.
-- Reusable Go SDK for embedding the proxy in other services.
+## Sponsor
+
+[![https://www.packyapi.com/register?aff=cliproxyapi](./assets/packycode-en.png)](https://www.packyapi.com/register?aff=cliproxyapi)
+
+Thanks to PackyCode for sponsoring this project!
+
+PackyCode is a reliable and efficient API relay service provider, offering relay services for Claude Code, Codex, Gemini, and more.
+
+PackyCode provides special discounts for our software users: register using <a href="https://www.packyapi.com/register?aff=cliproxyapi">this link</a> and enter the "cliproxyapi" promo code during recharge to get 10% off.
+
+---
+
+<table>
+<tbody>
+<tr>
+<td width="180"><a href="https://www.aicodemirror.com/register?invitecode=TJNAIF"><img src="./assets/aicodemirror.png" alt="AICodeMirror" width="150"></a></td>
+<td>Thanks to AICodeMirror for sponsoring this project! AICodeMirror provides official high-stability relay services for Claude Code / Codex / Gemini CLI, with enterprise-grade concurrency, fast invoicing, and 24/7 dedicated technical support. Claude Code / Codex / Gemini official channels at 38% / 2% / 9% of original price, with extra discounts on top-ups! AICodeMirror offers special benefits for CLIProxyAPI users: register via <a href="https://www.aicodemirror.com/register?invitecode=TJNAIF">this link</a> to enjoy 20% off your first top-up, and enterprise customers can get up to 25% off!</td>
+</tr>
+<tr>
+<td width="180"><a href="https://shop.bmoplus.com/?utm_source=github"><img src="./assets/bmoplus.png" alt="BmoPlus" width="150"></a></td>
+<td>Huge thanks to BmoPlus for sponsoring this project! BmoPlus is a highly reliable AI account provider built strictly for heavy AI users and developers. They offer rock-solid, ready-to-use accounts and official top-up services for ChatGPT Plus / ChatGPT Pro (Full Warranty) / Claude Pro / Super Grok / Gemini Pro. By registering and ordering through <a href="https://shop.bmoplus.com/?utm_source=github">BmoPlus - Premium AI Accounts & Top-ups</a>, users can unlock the mind-blowing rate of <b>10% of the official GPT subscription price (90% OFF)</b>!</td>
+</tr>
+<tr>
+<td width="180"><a href="https://coder.visioncoder.cn"><img src="./assets/visioncoder.png" alt="VisionCoder" width="150"></a></td>
+<td>Thanks to <b>VisionCoder</b> for supporting this project. <a href="https://coder.visioncoder.cn" target="_blank">VisionCoder Developer Platform</a> is a reliable and efficient API relay service provider, offering access to mainstream AI models such as Claude Code, Codex, and Gemini. It helps developers and teams integrate AI capabilities more easily and improve productivity.
+<p></p>
+VisionCoder is also offering our users a limited-time <a href="https://coder.visioncoder.cn" target="_blank">Token Plan</a> promotion: <b>buy 1 month and get 1 month free</b>.</td>
+</tr>
+<tr>
+<td width="180"><a href="https://apikey.fun/register?aff=CLIProxyAPI"><img src="./assets/apikey.png" alt="APIKEY.FUN" width="150"></a></td>
+<td>Thanks to APIKEY.FUN for sponsoring this project! APIKEY.FUN is a professional enterprise-grade AI relay platform dedicated to providing stable, efficient, and low-cost AI model API access for enterprises and individual developers. The platform supports popular mainstream models such as Claude, OpenAI, and Gemini, with prices as low as 7% of the official price. Register through this project's <a href="https://apikey.fun/register?aff=CLIProxyAPI">exclusive link</a> to enjoy a special <b>permanent 5% top-up discount</b>.</td>
+</tr>
+<tr>
+<td width="180"><a href="https://runapi.co/register?aff=FivD"><img src="./assets/runapi.png" alt="RunAPI" width="150"></a></td>
+<td>RunAPI is an efficient and stable API platform—an alternative to OpenRouter. A single API Key gives you access to 150+ leading models, including OpenAI, Claude, Gemini, DeepSeek, Grok, and more, at prices as low as 10% of the original (up to 90% off), with exceptional stability. It's seamlessly compatible with tools like Claude Code, OpenClaw, and others. RunAPI offers an exclusive perk for CPA users: <a href="https://runapi.co/register?aff=FivD">register</a> and contact an administrator to claim ¥7 in free credit.</td>
+</tr>
+</tbody>
+</table>
+
+## Overview
+
+- OpenAI/Gemini/Claude/Grok compatible API endpoints for CLI models
+- OpenAI Codex support (GPT models) via OAuth login
+- Claude Code support via OAuth login
+- Grok Build support via OAuth login
+- Amp CLI and IDE extensions support with provider routing
+- Streaming, non-streaming, and WebSocket responses where supported
+- Function calling/tools support
+- Multimodal input support (text and images)
+- Multiple accounts with round-robin load balancing (Gemini, OpenAI, Claude, Grok)
+- Simple CLI authentication flows (Gemini, OpenAI, Claude, Grok)
+- Generative Language API Key support
+- AI Studio Build multi-account load balancing
+- Gemini CLI multi-account load balancing
+- Claude Code multi-account load balancing
+- OpenAI Codex multi-account load balancing
+- Grok Build multi-account load balancing
+- OpenAI-compatible upstream providers via config (e.g., OpenRouter)
+- Per-client API key access control for upstream credentials and provider API keys
+- Reusable Go SDK for embedding the proxy (see `docs/sdk-usage.md`)
 
 ## Getting Started
 

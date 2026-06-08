@@ -2,12 +2,6 @@ name: docker-image
 
 on:
   workflow_dispatch:
-    inputs:
-      image_tag:
-        description: Docker image tag to publish
-        required: true
-        default: latest
-        type: string
   push:
     tags:
       - "v*-rum.*"
@@ -42,37 +36,42 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate image metadata
-        id: meta
+      - name: Resolve image name
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate build metadata
+        id: build
         shell: bash
         run: |
           set -euo pipefail
 
-          image_name="ghcr.io/${GITHUB_REPOSITORY,,}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            version="${{ inputs.image_tag }}"
-          else
+          version="latest"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME}"
           fi
 
-          commit="$(git rev-parse --short HEAD)"
-          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
           {
-            echo "image_name=${image_name}"
             echo "version=${version}"
-            echo "commit=${commit}"
-            echo "build_date=${build_date}"
-            echo "tags<<EOF"
-            echo "${image_name}:latest"
-            echo "${image_name}:${version}"
-            echo "EOF"
-            echo "labels<<EOF"
-            echo "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
-            echo "org.opencontainers.image.version=${version}"
-            echo "org.opencontainers.image.revision=${GITHUB_SHA}"
-            echo "EOF"
+            echo "commit=$(git rev-parse --short HEAD)"
+            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Generate Docker tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=latest
+            type=ref,event=tag
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.build.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -81,8 +80,23 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
-            COMMIT=${{ steps.meta.outputs.commit }}
-            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+            VERSION=${{ steps.build.outputs.version }}
+            COMMIT=${{ steps.build.outputs.commit }}
+            BUILD_DATE=${{ steps.build.outputs.build_date }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Publish image summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Docker image published"
+            echo
+            echo '```bash'
+            echo "docker pull ${{ steps.image.outputs.name }}:latest"
+            if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+              echo "docker pull ${{ steps.image.outputs.name }}:${GITHUB_REF_NAME}"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

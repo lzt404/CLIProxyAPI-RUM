@@ -5,13 +5,13 @@
 
 ## 镜像地址
 
-默认镜像：
+用户默认使用 `latest`：
 
 ```text
 ghcr.io/lzt404/cliproxyapi-rum:latest
 ```
 
-指定版本镜像：
+每次推送 RUM release tag 时，Actions 会同时发布一个不可变版本 tag：
 
 ```text
 ghcr.io/lzt404/cliproxyapi-rum:v7.1.31-rum.1
@@ -24,9 +24,7 @@ ghcr.io/lzt404/cliproxyapi-rum:v7.1.31-rum.1
 - `linux/amd64`
 - `linux/arm64`
 
-发布方式有两种。
-
-### 方式一：推送 RUM tag 自动发布
+## 发布者：自动发布 latest
 
 RUM fork 的 tag 必须保留 `-rum.N` 后缀，例如：
 
@@ -35,26 +33,27 @@ git tag v7.1.31-rum.1
 git push origin v7.1.31-rum.1
 ```
 
-推送后 GitHub Actions 会自动发布：
+推送 tag 后，GitHub Actions 会自动构建并发布：
 
 ```text
 ghcr.io/lzt404/cliproxyapi-rum:latest
 ghcr.io/lzt404/cliproxyapi-rum:v7.1.31-rum.1
 ```
 
-### 方式二：手动发布
+Actions Summary 里也会自动显示可复制的拉取命令：
 
-进入 GitHub 仓库页面：
+```bash
+docker pull ghcr.io/lzt404/cliproxyapi-rum:latest
+docker pull ghcr.io/lzt404/cliproxyapi-rum:v7.1.31-rum.1
+```
+
+如果只想手动重发当前分支的 `latest`，进入 GitHub 仓库页面：
 
 ```text
 Actions -> docker-image -> Run workflow
 ```
 
-`image_tag` 填你要发布的镜像 tag，例如：
-
-```text
-v7.1.31-rum.1
-```
+手动运行不需要填写镜像 tag，会直接发布 `ghcr.io/lzt404/cliproxyapi-rum:latest`。
 
 ## 首次发布后的可见性
 

@@ -129,6 +129,10 @@ func (h *Handler) PutAPIKeys(c *gin.Context) {
 		}
 		h.mu.Lock()
 		defer h.mu.Unlock()
+		if unknown := h.unknownAPIKeyAccessRuleAuthIndex(rules); unknown != "" {
+			c.JSON(400, gin.H{"error": "unknown auth index", "auth-index": unknown})
+			return
+		}
 		h.cfg.APIKeys = keys
 		h.cfg.APIKeyAccessRules = rules
 		h.cfg.SanitizeAPIKeyAccessRules()
@@ -155,6 +159,15 @@ func (h *Handler) PatchAPIKeys(c *gin.Context) {
 		}
 		h.mu.Lock()
 		defer h.mu.Unlock()
+		updatedRule := config.APIKeyAccessRule{
+			APIKey:             strings.TrimSpace(keyEntry.entry.APIKey),
+			AllowedAuthIndexes: config.NormalizeStringList(keyEntry.entry.AllowedAuthIndexes),
+			AllowedAuthIDs:     config.NormalizeStringList(keyEntry.entry.AllowedAuthIDs),
+		}
+		if unknown := h.unknownAPIKeyAccessRuleAuthIndex([]config.APIKeyAccessRule{updatedRule}); unknown != "" {
+			c.JSON(400, gin.H{"error": "unknown auth index", "auth-index": unknown})
+			return
+		}
 		patchAPIKeyEntry(h.cfg, keyEntry.index, keyEntry.oldKey, keyEntry.entry)
 		h.cfg.SanitizeAPIKeyAccessRules()
 		h.persistLocked(c)

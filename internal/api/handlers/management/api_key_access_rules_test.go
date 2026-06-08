@@ -1,6 +1,7 @@
 package management
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 func TestPutAPIKeyAccessRulesAcceptsRawArrayAndCamelFields(t *testing.T) {
@@ -92,6 +94,171 @@ func TestPatchAPIKeyAccessRulesRejectsUnknownAPIKey(t *testing.T) {
 	if len(h.cfg.APIKeyAccessRules) != 0 {
 		t.Fatalf("APIKeyAccessRules = %#v, want unchanged empty list", h.cfg.APIKeyAccessRules)
 	}
+}
+
+func TestPatchAPIKeyAccessRulesRejectsUnknownAuthIndex(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	if _, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+		ID:       "auth-a",
+		Provider: "gemini",
+		Attributes: map[string]string{
+			"api_key": "upstream-a",
+		},
+	}); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	h := &Handler{
+		cfg: &config.Config{
+			SDKConfig: config.SDKConfig{
+				APIKeys:           []string{"client-a"},
+				APIKeyAccessRules: []config.APIKeyAccessRule{{APIKey: "client-a", AllowedAuthIndexes: []string{"existing-index"}}},
+			},
+		},
+		authManager:    manager,
+		configFilePath: writeTestConfigFile(t),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPatch, "/v0/management/api-key-access-rules", strings.NewReader(`{
+		"value": [{"api-key":"client-a","allowed-auth-indexes":["stale-index"]}]
+	}`))
+
+	h.PatchAPIKeyAccessRules(c)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	assertManagementAccessRule(t, h.cfg.APIKeyAccessRules[0], "client-a", []string{"existing-index"}, nil)
+}
+
+func TestPutAPIKeyAccessRulesAcceptsKnownAuthIndex(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth := &coreauth.Auth{
+		ID:       "auth-a",
+		Provider: "gemini",
+		Attributes: map[string]string{
+			"api_key": "upstream-a",
+		},
+	}
+	if _, errRegister := manager.Register(context.Background(), auth); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+	authIndex := auth.EnsureIndex()
+	if authIndex == "" {
+		t.Fatal("auth index should not be empty")
+	}
+
+	h := &Handler{
+		cfg: &config.Config{
+			SDKConfig: config.SDKConfig{APIKeys: []string{"client-a"}},
+		},
+		authManager:    manager,
+		configFilePath: writeTestConfigFile(t),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/v0/management/api-key-access-rules", strings.NewReader(`[
+		{"api-key":"client-a","allowed-auth-indexes":["`+authIndex+`"]}
+	]`))
+
+	h.PutAPIKeyAccessRules(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	assertManagementAccessRule(t, h.cfg.APIKeyAccessRules[0], "client-a", []string{authIndex}, nil)
+}
+
+func TestPutAPIKeysRejectsUnknownInlineAuthIndex(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	if _, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+		ID:       "auth-a",
+		Provider: "gemini",
+		Attributes: map[string]string{
+			"api_key": "upstream-a",
+		},
+	}); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	h := &Handler{
+		cfg: &config.Config{
+			SDKConfig: config.SDKConfig{
+				APIKeys:           []string{"client-a"},
+				APIKeyAccessRules: []config.APIKeyAccessRule{{APIKey: "client-a", AllowedAuthIndexes: []string{"existing-index"}}},
+			},
+		},
+		authManager:    manager,
+		configFilePath: writeTestConfigFile(t),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/v0/management/api-keys", strings.NewReader(`[
+		{"api-key":"client-a","allowed-auth-indexes":["stale-index"]}
+	]`))
+
+	h.PutAPIKeys(c)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if len(h.cfg.APIKeys) != 1 || h.cfg.APIKeys[0] != "client-a" {
+		t.Fatalf("APIKeys = %#v, want unchanged client-a", h.cfg.APIKeys)
+	}
+	assertManagementAccessRule(t, h.cfg.APIKeyAccessRules[0], "client-a", []string{"existing-index"}, nil)
+}
+
+func TestPatchAPIKeysRejectsUnknownInlineAuthIndex(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	if _, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+		ID:       "auth-a",
+		Provider: "gemini",
+		Attributes: map[string]string{
+			"api_key": "upstream-a",
+		},
+	}); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	h := &Handler{
+		cfg: &config.Config{
+			SDKConfig: config.SDKConfig{
+				APIKeys:           []string{"client-a"},
+				APIKeyAccessRules: []config.APIKeyAccessRule{{APIKey: "client-a", AllowedAuthIndexes: []string{"existing-index"}}},
+			},
+		},
+		authManager:    manager,
+		configFilePath: writeTestConfigFile(t),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPatch, "/v0/management/api-keys", strings.NewReader(`{
+		"index": 0,
+		"value": {"api-key":"client-a","allowed-auth-indexes":["stale-index"]}
+	}`))
+
+	h.PatchAPIKeys(c)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if len(h.cfg.APIKeys) != 1 || h.cfg.APIKeys[0] != "client-a" {
+		t.Fatalf("APIKeys = %#v, want unchanged client-a", h.cfg.APIKeys)
+	}
+	assertManagementAccessRule(t, h.cfg.APIKeyAccessRules[0], "client-a", []string{"existing-index"}, nil)
 }
 
 func TestDeleteAPIKeyAccessRulesAcceptsRawArrayAndLeavesDeniedRule(t *testing.T) {

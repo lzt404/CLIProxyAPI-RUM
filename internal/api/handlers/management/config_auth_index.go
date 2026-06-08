@@ -77,6 +77,53 @@ func (h *Handler) liveAuthIndexByID() map[string]string {
 	return out
 }
 
+func (h *Handler) liveOpenAICompatibilityAuthIndexByIdentity() map[string]string {
+	out := map[string]string{}
+	if h == nil {
+		return out
+	}
+	h.mu.Lock()
+	manager := h.authManager
+	h.mu.Unlock()
+	if manager == nil {
+		return out
+	}
+	for _, auth := range manager.List() {
+		if auth == nil {
+			continue
+		}
+		if auth.Attributes == nil {
+			continue
+		}
+		if strings.TrimSpace(auth.Attributes["compat_name"]) == "" &&
+			!strings.EqualFold(strings.TrimSpace(auth.Provider), "openai-compatibility") {
+			continue
+		}
+		key := openAICompatibilityAuthIdentityKey(auth.Attributes["api_key"], auth.Attributes["base_url"])
+		if key == "" {
+			continue
+		}
+		idx := strings.TrimSpace(auth.Index)
+		if idx == "" {
+			idx = strings.TrimSpace(auth.EnsureIndex())
+		}
+		if idx == "" {
+			continue
+		}
+		out[key] = idx
+	}
+	return out
+}
+
+func openAICompatibilityAuthIdentityKey(apiKey, baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	apiKey = strings.TrimSpace(apiKey)
+	if baseURL == "" && apiKey == "" {
+		return ""
+	}
+	return baseURL + "\x00" + apiKey
+}
+
 func (h *Handler) geminiKeysWithAuthIndex() []geminiKeyWithAuthIndex {
 	if h == nil {
 		return nil
@@ -195,6 +242,7 @@ func (h *Handler) openAICompatibilityWithAuthIndex() []openAICompatibilityWithAu
 		return nil
 	}
 	liveIndexByID := h.liveAuthIndexByID()
+	liveIndexByIdentity := h.liveOpenAICompatibilityAuthIndexByIdentity()
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -230,10 +278,13 @@ func (h *Handler) openAICompatibilityWithAuthIndex() []openAICompatibilityWithAu
 			response.APIKeyEntries = make([]openAICompatibilityAPIKeyWithAuthIndex, len(entry.APIKeyEntries))
 			for j := range entry.APIKeyEntries {
 				apiKeyEntry := entry.APIKeyEntries[j]
-				id, _ := idGen.Next(idKind, apiKeyEntry.APIKey, entry.BaseURL, apiKeyEntry.ProxyURL)
+				authIndex := liveIndexByIdentity[openAICompatibilityAuthIdentityKey(apiKeyEntry.APIKey, entry.BaseURL)]
 				response.APIKeyEntries[j] = openAICompatibilityAPIKeyWithAuthIndex{
 					OpenAICompatibilityAPIKey: apiKeyEntry,
-					AuthIndex:                 liveIndexByID[id],
+					AuthIndex:                 authIndex,
+				}
+				if len(entry.APIKeyEntries) == 1 {
+					response.AuthIndex = authIndex
 				}
 			}
 		}

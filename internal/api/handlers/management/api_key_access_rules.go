@@ -2,6 +2,7 @@ package management
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -48,6 +49,10 @@ func (h *Handler) PutAPIKeyAccessRules(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "unknown api key", "api-key": unknown})
 		return
 	}
+	if unknown := h.unknownAPIKeyAccessRuleAuthIndex(normalized); unknown != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown auth index", "auth-index": unknown})
+		return
+	}
 	h.cfg.APIKeyAccessRules = normalized
 	h.cfg.SanitizeAPIKeyAccessRules()
 	h.persistLocked(c)
@@ -84,6 +89,10 @@ func (h *Handler) PatchAPIKeyAccessRules(c *gin.Context) {
 	defer h.mu.Unlock()
 	if unknown := unknownAPIKeyAccessRuleKey(h.cfg.APIKeys, normalized); unknown != "" {
 		c.JSON(400, gin.H{"error": "unknown api key", "api-key": unknown})
+		return
+	}
+	if unknown := h.unknownAPIKeyAccessRuleAuthIndex(normalized); unknown != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown auth index", "auth-index": unknown})
 		return
 	}
 	h.cfg.APIKeyAccessRules = patchAPIKeyAccessRules(h.cfg.APIKeyAccessRules, normalized)
@@ -245,6 +254,44 @@ func unknownAPIKeyAccessRuleKey(apiKeys []string, rules []config.APIKeyAccessRul
 		}
 		if _, ok := known[key]; !ok {
 			return key
+		}
+	}
+	return ""
+}
+
+func (h *Handler) unknownAPIKeyAccessRuleAuthIndex(rules []config.APIKeyAccessRule) string {
+	if h == nil || h.authManager == nil {
+		return ""
+	}
+
+	wanted := make(map[string]struct{})
+	for _, rule := range rules {
+		for _, authIndex := range config.NormalizeStringList(rule.AllowedAuthIndexes) {
+			wanted[authIndex] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return ""
+	}
+
+	for _, auth := range h.authManager.List() {
+		if auth == nil {
+			continue
+		}
+		idx := strings.TrimSpace(auth.Index)
+		if idx == "" {
+			idx = strings.TrimSpace(auth.EnsureIndex())
+		}
+		if idx != "" {
+			delete(wanted, idx)
+		}
+	}
+
+	for _, rule := range rules {
+		for _, authIndex := range config.NormalizeStringList(rule.AllowedAuthIndexes) {
+			if _, ok := wanted[authIndex]; ok {
+				return authIndex
+			}
 		}
 	}
 	return ""

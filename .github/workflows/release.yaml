@@ -42,7 +42,8 @@ jobs:
 
           ## FreeBSD release assets
 
-          - `CLIProxyAPI_<version>_freebsd_aarch64_no-plugin.tar.gz` is the FreeBSD arm64 build. It is built without CGO and does not support dynamic library plugins.
+          - `cli-proxy-api-rum_<tag>_freebsd_amd64.tar.gz` is the FreeBSD amd64 build.
+          - `cli-proxy-api-rum_<tag>_freebsd_aarch64_no-plugin.tar.gz` is the FreeBSD arm64 build. It is built without CGO and does not support dynamic library plugins.
 
           <!-- cliproxyapi-linux-release-assets:end -->
           EOF

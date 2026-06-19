@@ -1660,9 +1660,7 @@ func (h *Handler) PutAmpUpstreamAPIKeys(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid body"})
 		return
 	}
-	// Normalize entries: trim whitespace, filter empty
-	normalized := normalizeAmpUpstreamAPIKeyEntries(body.Value)
-	h.cfg.AmpCode.UpstreamAPIKeys = normalized
+	h.cfg.AmpCode.UpstreamAPIKeys = normalizeAmpUpstreamAPIKeyEntries(body.Value)
 	h.persist(c)
 }
 
@@ -1702,9 +1700,6 @@ func (h *Handler) PatchAmpUpstreamAPIKeys(c *gin.Context) {
 }
 
 // DeleteAmpUpstreamAPIKeys removes specified upstream API keys entries.
-// Body must be JSON: {"value": ["<upstream-api-key>", ...]}.
-// If "value" is an empty array, clears all entries.
-// If JSON is invalid or "value" is missing/null, returns 400 and does not persist any change.
 func (h *Handler) DeleteAmpUpstreamAPIKeys(c *gin.Context) {
 	var body struct {
 		Value []string `json:"value"`
@@ -1713,13 +1708,10 @@ func (h *Handler) DeleteAmpUpstreamAPIKeys(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid body"})
 		return
 	}
-
 	if body.Value == nil {
 		c.JSON(400, gin.H{"error": "missing value"})
 		return
 	}
-
-	// Empty array means clear all
 	if len(body.Value) == 0 {
 		h.cfg.AmpCode.UpstreamAPIKeys = nil
 		h.persist(c)
@@ -1729,10 +1721,9 @@ func (h *Handler) DeleteAmpUpstreamAPIKeys(c *gin.Context) {
 	toRemove := make(map[string]bool)
 	for _, key := range body.Value {
 		trimmed := strings.TrimSpace(key)
-		if trimmed == "" {
-			continue
+		if trimmed != "" {
+			toRemove[trimmed] = true
 		}
-		toRemove[trimmed] = true
 	}
 	if len(toRemove) == 0 {
 		c.JSON(400, gin.H{"error": "empty value"})
@@ -1749,7 +1740,6 @@ func (h *Handler) DeleteAmpUpstreamAPIKeys(c *gin.Context) {
 	h.persist(c)
 }
 
-// normalizeAmpUpstreamAPIKeyEntries normalizes a list of upstream API key entries.
 func normalizeAmpUpstreamAPIKeyEntries(entries []config.AmpUpstreamAPIKeyEntry) []config.AmpUpstreamAPIKeyEntry {
 	if len(entries) == 0 {
 		return nil
@@ -1760,10 +1750,9 @@ func normalizeAmpUpstreamAPIKeyEntries(entries []config.AmpUpstreamAPIKeyEntry) 
 		if upstreamKey == "" {
 			continue
 		}
-		apiKeys := normalizeAPIKeysList(entry.APIKeys)
 		out = append(out, config.AmpUpstreamAPIKeyEntry{
 			UpstreamAPIKey: upstreamKey,
-			APIKeys:        apiKeys,
+			APIKeys:        normalizeAPIKeysList(entry.APIKeys),
 		})
 	}
 	if len(out) == 0 {
@@ -1772,14 +1761,13 @@ func normalizeAmpUpstreamAPIKeyEntries(entries []config.AmpUpstreamAPIKeyEntry) 
 	return out
 }
 
-// normalizeAPIKeysList trims and filters empty strings from a list of API keys.
 func normalizeAPIKeysList(keys []string) []string {
 	if len(keys) == 0 {
 		return nil
 	}
 	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		trimmed := strings.TrimSpace(k)
+	for _, key := range keys {
+		trimmed := strings.TrimSpace(key)
 		if trimmed != "" {
 			out = append(out, trimmed)
 		}

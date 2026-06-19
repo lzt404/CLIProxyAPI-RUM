@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	sigcompat "github.com/router-for-me/CLIProxyAPI/v7/internal/signature"
@@ -369,6 +370,16 @@ func ConvertOpenAIResponsesRequestToGemini(modelName string, inputRawJSON []byte
 		out, _ = sjson.SetRawBytes(out, "contents.-1", userContent)
 	}
 
+	// Gemini/Vertex accepts assistant/model turns in history, but some model
+	// surfaces reject requests whose final turn is model-authored prefill.
+	contents := gjson.GetBytes(out, "contents")
+	if contents.Exists() && contents.IsArray() {
+		arr := contents.Array()
+		if len(arr) > 0 && arr[len(arr)-1].Get("role").String() == "model" && !isGeminiThoughtOnlyContent(arr[len(arr)-1]) {
+			out, _ = sjson.DeleteBytes(out, fmt.Sprintf("contents.%d", len(arr)-1))
+		}
+	}
+
 	// Convert tools to Gemini functionDeclarations format
 	if tools := root.Get("tools"); tools.Exists() && tools.IsArray() {
 		geminiTools := []byte(`[{"functionDeclarations":[]}]`)
@@ -454,6 +465,23 @@ func ConvertOpenAIResponsesRequestToGemini(modelName string, inputRawJSON []byte
 	result := out
 	result = common.AttachDefaultSafetySettings(result, "safetySettings")
 	return result
+}
+
+func isGeminiThoughtOnlyContent(content gjson.Result) bool {
+	parts := content.Get("parts")
+	if !parts.Exists() || !parts.IsArray() {
+		return false
+	}
+	partArray := parts.Array()
+	if len(partArray) == 0 {
+		return false
+	}
+	for _, part := range partArray {
+		if !part.Get("thought").Bool() {
+			return false
+		}
+	}
+	return true
 }
 
 func openAIResponsesGeminiThoughtSignature(rawSignature string) string {
